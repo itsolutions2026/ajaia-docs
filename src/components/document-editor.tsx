@@ -1,18 +1,15 @@
 "use client";
 
-import { EditorContent, useEditor, type Editor } from "@tiptap/react";
-import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { EditorContent, useEditor } from "@tiptap/react";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 
+import { Autosave, type SaveStatus } from "@/lib/autosave";
 import { contentExtensions } from "@/lib/content/extensions";
 
-type Status = "saved" | "dirty" | "saving" | "error" | "expired" | "conflict" | "gone" | "rejected";
 type Collaborator = { id: string; name: string; email: string };
 
-const DEBOUNCE_MS = 1500;
-const RETRY_MS = 10_000;
-
-const STATUS_TEXT: Record<Status, string> = {
+const STATUS_TEXT: Record<SaveStatus, string> = {
   saved: "Saved",
   dirty: "Unsaved changes…",
   saving: "Saving…",
@@ -20,7 +17,7 @@ const STATUS_TEXT: Record<Status, string> = {
   expired: "Session expired. Sign in again in another tab; your changes will then save.",
   conflict: "Not saved: the document changed elsewhere.",
   gone: "Not saved: this document is no longer available.",
-  rejected: "Not saved: the server rejected the change.",
+  rejected: "Not saved: the server rejected the change. Edit the document to try again.",
 };
 
 export default function DocumentEditor(props: {
@@ -33,93 +30,25 @@ export default function DocumentEditor(props: {
   collaborators?: Collaborator[];
 }) {
   const { id, role } = props;
+  const router = useRouter();
   const [title, setTitle] = useState(props.title);
-  const [status, setStatus] = useState<Status>("saved");
+  const [status, setStatus] = useState<SaveStatus>("saved");
   const [detail, setDetail] = useState("");
+  const [leaving, setLeaving] = useState(false);
 
-  const baseVersion = useRef(props.version);
-  const dirtyContent = useRef(false);
-  const dirtyTitle = useRef(false);
-  const inFlight = useRef(false);
-  const halted = useRef(false);
-  const titleRef = useRef(props.title);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const editorRef = useRef<Editor | null>(null);
-  const flushRef = useRef<() => Promise<void>>(async () => {});
+  const allowUnload = useRef(false);
 
-  const schedule = useCallback((ms: number) => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => void flushRef.current(), ms);
-  }, []);
-
-  async function flush() {
-    if (inFlight.current || halted.current) return;
-    const sendContent = dirtyContent.current;
-    const sendTitle = dirtyTitle.current;
-    if (!sendContent && !sendTitle) return;
-    const editor = editorRef.current;
-    if (sendContent && !editor) return;
-
-    inFlight.current = true;
-    dirtyContent.current = false;
-    dirtyTitle.current = false;
-    setStatus("saving");
-
-    const body: Record<string, unknown> = { baseVersion: baseVersion.current };
-    if (sendContent) body.content = editor!.getJSON();
-    if (sendTitle) body.title = titleRef.current;
-
-    let res: Response | null = null;
-    try {
-      res = await fetch(`/api/documents/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-    } catch {
-      res = null;
-    }
-    inFlight.current = false;
-
-    if (res?.ok) {
-      const data = (await res.json()) as { version: number };
-      baseVersion.current = data.version;
-      if (dirtyContent.current || dirtyTitle.current) {
-        setStatus("dirty");
-        schedule(DEBOUNCE_MS);
-      } else {
-        setStatus("saved");
-      }
-      return;
-    }
-
-    // Failure: nothing is discarded. Mark the pending fields dirty again.
-    if (sendContent) dirtyContent.current = true;
-    if (sendTitle) dirtyTitle.current = true;
-
-    if (!res) {
-      setStatus("error");
-      schedule(RETRY_MS);
-    } else if (res.status === 401) {
-      setStatus("expired");
-      schedule(RETRY_MS);
-    } else if (res.status >= 500) {
-      setStatus("error");
-      schedule(RETRY_MS);
-    } else {
-      halted.current = true; // 404 / 409 / 413 / 422 / 403: stop saving, keep content
-      if (res.status === 409) setStatus("conflict");
-      else if (res.status === 404) setStatus("gone");
-      else {
-        setStatus("rejected");
-        try {
-          setDetail(((await res.json()) as { error?: { message?: string } }).error?.message ?? "");
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-  }
+  const [autosave] = useState(
+    () =>
+      new Autosave({
+        docId: props.id,
+        version: props.version,
+        onStatus: (s, d) => {
+          setStatus(s);
+          setDetail(d ?? "");
+        },
+      }),
+  );
 
   const editor = useEditor({
     extensions: contentExtensions,
@@ -127,36 +56,51 @@ export default function DocumentEditor(props: {
     immediatelyRender: false,
     shouldRerenderOnTransaction: true,
     editorProps: { attributes: { class: "ajaia-editor" } },
-    onUpdate: () => {
-      if (halted.current) return;
-      dirtyContent.current = true;
-      setStatus((s) => (s === "error" || s === "expired" || s === "saving" ? s : "dirty"));
-      schedule(DEBOUNCE_MS);
+    onUpdate: ({ editor: e }) => {
+      autosave.setContent(e.getJSON());
     },
   });
-  useEffect(() => {
-    flushRef.current = flush;
-    editorRef.current = editor;
-  });
 
-  useEffect(() => () => clearTimeout(timer.current), []);
+  // On unmount (including in-app navigation that bypassed leave()), keep
+  // saving in the background: the page is still alive, so the request completes.
+  useEffect(
+    () => () => {
+      autosave.dispose();
+      void autosave.flushNow();
+    },
+    [autosave],
+  );
 
+  // Browser-level leave warning (reload, close tab, external navigation).
   useEffect(() => {
     if (status === "saved") return;
     const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
+      if (!allowUnload.current) e.preventDefault();
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [status]);
 
+  // In-app navigation: save first, and only leave silently if everything saved.
+  async function leave() {
+    setLeaving(true);
+    const clean = await autosave.flushNow();
+    if (clean || window.confirm("Some changes could not be saved. Leave anyway and lose them?")) {
+      router.push("/documents");
+      router.refresh();
+    } else {
+      setLeaving(false);
+    }
+  }
+
   function onTitleChange(value: string) {
     setTitle(value);
-    titleRef.current = value;
-    if (halted.current) return;
-    dirtyTitle.current = true;
-    setStatus((s) => (s === "error" || s === "expired" || s === "saving" ? s : "dirty"));
-    schedule(DEBOUNCE_MS);
+    autosave.setTitle(value);
+  }
+
+  function onTitleBlur() {
+    // The server stores an empty title as "Untitled document"; show the same.
+    if (title.trim() === "") onTitleChange("Untitled document");
   }
 
   // ---- Sharing (owner only) ----
@@ -206,9 +150,14 @@ export default function DocumentEditor(props: {
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6">
       <div className="mb-4 flex items-center justify-between text-sm">
-        <Link href="/documents" className="text-zinc-500 hover:underline">
-          ← All documents
-        </Link>
+        <button
+          type="button"
+          onClick={() => void leave()}
+          disabled={leaving}
+          className="text-zinc-500 hover:underline disabled:opacity-50"
+        >
+          {leaving ? "Saving…" : "← All documents"}
+        </button>
         <span className={statusColor} role="status" aria-live="polite">
           {STATUS_TEXT[status]}
         </span>
@@ -223,7 +172,7 @@ export default function DocumentEditor(props: {
             className="font-medium underline"
             onClick={() => {
               if (window.confirm("Reload the latest version? Your unsaved changes will be discarded.")) {
-                halted.current = false;
+                allowUnload.current = true;
                 window.location.reload();
               }
             }}
@@ -246,6 +195,7 @@ export default function DocumentEditor(props: {
           value={title}
           maxLength={200}
           onChange={(e) => onTitleChange(e.target.value)}
+          onBlur={onTitleBlur}
           aria-label="Document title"
           className="w-full bg-transparent text-3xl font-semibold tracking-tight outline-none"
         />

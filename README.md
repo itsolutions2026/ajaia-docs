@@ -16,7 +16,7 @@ Suggested checks: sign in as Alice, edit and rename the document, share a new do
 
 - Seeded demo users, scrypt password hashes, server-managed sessions (HttpOnly cookie, hashed token stored in the database)
 - Create, rename (owner only), edit and reopen documents; TipTap JSON storage (bold, italic, underline, H1/H2, bullet and numbered lists)
-- Debounced autosave with visible status; failures never discard editor content (retry, leave-page warning)
+- Debounced autosave with visible status. A failed save keeps your text in the editor and retries; leaving through the app saves first and asks before discarding anything unsaved; closing or reloading the tab shows a leave-page warning
 - Optimistic concurrency: every save carries the document version; stale saves get a 409 and the editor keeps local text with a conflict banner
 - Sharing by email (owner only, editor access). The response is identical for known and unknown emails; only the owner's collaborator list shows real membership
 - Import `.txt` / `.md` (max 1 MB), validated and converted server-side to the allowlisted editor schema (raw HTML becomes inert text, links are dropped)
@@ -24,9 +24,11 @@ Suggested checks: sign in as Alice, edit and rename the document, share a new do
 
 ## Security model
 
-Application-level authorization through `resolveAccess()` (`src/lib/documents.ts`) is the security boundary for every document operation. Row Level Security is enabled on all tables with no policies so the Supabase public API exposes nothing, but RLS is not relied on for owner/editor permissions. Client-supplied user IDs are never trusted; identity comes only from the session cookie. State-changing API requests require a same-origin `Origin` header.
+Application-level authorization through `resolveAccess()` (`src/lib/documents.ts`) is the security boundary for every document operation. Row Level Security is enabled on all tables with no policies so the Supabase public API exposes nothing, but RLS is not relied on for owner/editor permissions. Client-supplied user IDs are never trusted; identity comes only from the session cookie. State-changing API requests require a same-origin `Origin` header. Responses carry a Content-Security-Policy and standard security headers (`next.config.ts`).
 
 ## Local development
+
+Requires Node.js 22.6 or later (see `.nvmrc`; the seed script uses Node's built-in TypeScript support). `dev` and `build` use webpack (`--webpack`), and the build downloads the Geist font, so it needs network access.
 
 ```bash
 npm install
@@ -45,18 +47,20 @@ npm test                          # unit tests; no database needed
 ALLOW_DB_TESTS=1 npm run test:db  # database integration tests (explicit opt-in)
 ```
 
+CI (`.github/workflows/ci.yml`) runs lint, the unit tests and the production build on every push and pull request. The database tests need credentials and are run locally.
+
 Integration tests create their own users on the reserved `@test.invalid` domain, only touch documents those users own, never act as demo users, delete only what they created, and compare a fingerprint of the demo documents before and after the run.
 
 ## Deployment (Vercel + Supabase Free)
 
 - Vercel environment variable: `DATABASE_URL` (transaction pooler, port 6543), Production scope. Nothing else is required at runtime.
 - Migrations and seeding run from a developer machine, not during the Vercel build.
-- Preview deployments are disabled; only the production branch deploys.
+- Preview deployments should be disabled in the Vercel project settings so only the production branch deploys (this is a dashboard setting, not stored in the repository).
 
 ## Known limitations
 
 - **Supabase Free pauses inactive projects** (after about a week at the time of writing). There is no keep-alive. If the app shows "Service temporarily unavailable", open the Supabase dashboard and restore the project, then reload.
 - No login rate limiting. Demo credentials are public by design; anyone can sign in as a demo user and change demo data.
 - Concurrent edits are detected and rejected, never merged. The version number is a concurrency token, not history.
-- Autosave on page unload is best effort; a leave-page warning covers unsaved changes.
+- Saving when the tab is closed is not possible; the browser's leave-page warning covers unsaved changes in that case.
 - Not built: real-time collaboration, comments, version history, viewer role, document deletion, `.docx`/PDF import.

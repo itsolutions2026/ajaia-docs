@@ -102,14 +102,28 @@ export function ImportButton() {
 
 export function LogoutButton() {
   const router = useRouter();
+  const [error, setError] = useState("");
   async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/");
-    router.refresh();
+    setError("");
+    try {
+      const res = await fetch("/api/auth/logout", { method: "POST" });
+      if (!res.ok) throw new Error();
+      router.push("/");
+      router.refresh();
+    } catch {
+      setError("Couldn't sign out. Try again.");
+    }
   }
   return (
-    <button type="button" onClick={logout} className="text-sm text-zinc-500 hover:underline">
-      Sign out
-    </button>
+    <span>
+      <button type="button" onClick={logout} className="text-sm text-zinc-500 hover:underline">
+        Sign out
+      </button>
+      {error && (
+        <span role="alert" className="ml-2 text-sm text-red-600">
+          {error}
+        </span>
+      )}
+    </span>
   );
 }

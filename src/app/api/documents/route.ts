@@ -1,16 +1,16 @@
 import { createDocument, listDocuments } from "@/lib/documents";
-import { badOrigin, requireUser, sameOrigin, unauthenticated } from "@/lib/http";
+import { badOrigin, handle, json, requireUser, sameOrigin, unauthenticated } from "@/lib/http";
 
-export async function GET() {
+export const GET = handle(async () => {
   const user = await requireUser();
   if (!user) return unauthenticated();
-  return Response.json(await listDocuments(user.id), { headers: { "Cache-Control": "no-store" } });
-}
+  return json(await listDocuments(user.id));
+});
 
-export async function POST(request: Request) {
+export const POST = handle(async (request: Request) => {
   if (!sameOrigin(request)) return badOrigin();
   const user = await requireUser();
   if (!user) return unauthenticated();
   const id = await createDocument(user.id);
-  return Response.json({ id }, { status: 201, headers: { "Cache-Control": "no-store" } });
-}
+  return json({ id }, 201);
+});

@@ -5,7 +5,9 @@ import { contentExtensions } from "./extensions";
 
 export const MAX_CONTENT_BYTES = 1_000_000;
 const MAX_NODES = 50_000;
-const MAX_DEPTH = 12;
+// Each nested list level adds two levels (list + item); 40 allows ~19 nested
+// list levels, well beyond what the editor is used for in practice.
+const MAX_DEPTH = 40;
 
 const schema = getSchema(contentExtensions);
 

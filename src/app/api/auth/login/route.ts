@@ -1,19 +1,22 @@
 import { login } from "@/lib/auth";
-import { badOrigin, jsonError, readJson, sameOrigin } from "@/lib/http";
+import { badOrigin, handle, json, jsonError, readJson, sameOrigin, tooLarge } from "@/lib/http";
 
-export async function POST(request: Request) {
+export const POST = handle(async (request: Request) => {
   if (!sameOrigin(request)) return badOrigin();
-  const body = (await readJson(request, 10_000)) as { email?: unknown; password?: unknown } | null;
+  const body = await readJson(request, 10_000);
+  if (!body.ok && body.reason === "too_large") return tooLarge();
+
+  const value = (body.ok ? body.value : null) as { email?: unknown; password?: unknown } | null;
   if (
-    !body ||
-    typeof body.email !== "string" ||
-    typeof body.password !== "string" ||
-    body.email.length > 320 ||
-    body.password.length > 200
+    !value ||
+    typeof value.email !== "string" ||
+    typeof value.password !== "string" ||
+    value.email.length > 320 ||
+    value.password.length > 200
   ) {
     return jsonError(401, "invalid_credentials", "Invalid email or password.");
   }
-  const ok = await login(body.email, body.password);
+  const ok = await login(value.email, value.password);
   if (!ok) return jsonError(401, "invalid_credentials", "Invalid email or password.");
-  return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
-}
+  return json({ ok: true });
+});

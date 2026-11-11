@@ -1,26 +1,29 @@
 import { getDocument, updateDocument } from "@/lib/documents";
 import {
   badOrigin,
+  handle,
+  json,
   jsonError,
   notFound,
   readJson,
   requireUser,
   sameOrigin,
+  tooLarge,
   unauthenticated,
 } from "@/lib/http";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function GET(_request: Request, { params }: Ctx) {
+export const GET = handle(async (_request: Request, { params }: Ctx) => {
   const user = await requireUser();
   if (!user) return unauthenticated();
   const { id } = await params;
   const doc = await getDocument(user.id, id);
   if (!doc) return notFound();
-  return Response.json(doc, { headers: { "Cache-Control": "no-store" } });
-}
+  return json(doc);
+});
 
-export async function PATCH(request: Request, { params }: Ctx) {
+export const PATCH = handle(async (request: Request, { params }: Ctx) => {
   if (!sameOrigin(request)) return badOrigin();
   const user = await requireUser();
   if (!user) return unauthenticated();
@@ -28,16 +31,13 @@ export async function PATCH(request: Request, { params }: Ctx) {
 
   // Size limit is independent of the document, so it can't leak existence.
   const body = await readJson(request);
-  if (body === undefined) return jsonError(413, "too_large", "Request is too large.");
+  if (!body.ok && body.reason === "too_large") return tooLarge();
 
-  // The service checks access first, then validates the body.
-  const result = await updateDocument(user.id, id, body);
-  if (result.ok) {
-    return Response.json(
-      { version: result.version, updatedAt: result.updatedAt },
-      { headers: { "Cache-Control": "no-store" } },
-    );
-  }
+  // Invalid JSON is passed on as null: the service checks access first, so a
+  // malformed body on an inaccessible document still returns not-found.
+  const result = await updateDocument(user.id, id, body.ok ? body.value : null);
+  if (result.ok) return json({ version: result.version, updatedAt: result.updatedAt });
+
   switch (result.code) {
     case "not_found":
       return notFound();
@@ -50,4 +50,4 @@ export async function PATCH(request: Request, { params }: Ctx) {
     default:
       return jsonError(422, "invalid", result.message);
   }
-}
+});
