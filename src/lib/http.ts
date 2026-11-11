@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getSessionUser, type SessionUser } from "@/lib/auth";
+import { MAX_CONTENT_BYTES } from "@/lib/content/validate";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -50,8 +51,15 @@ export type JsonBody =
   | { ok: true; value: unknown }
   | { ok: false; reason: "too_large" | "invalid" };
 
-/** Reads a JSON body with a size cap. Never throws. */
-export async function readJson(request: Request, maxBytes = 1_200_000): Promise<JsonBody> {
+/**
+ * Default request cap (UTF-8 bytes): the content limit plus headroom for the
+ * rest of a save request (baseVersion, title). Must stay above
+ * MAX_CONTENT_BYTES, or valid documents could not be saved.
+ */
+export const MAX_REQUEST_BYTES = MAX_CONTENT_BYTES + 200_000;
+
+/** Reads a JSON body with a size cap in UTF-8 bytes. Never throws. */
+export async function readJson(request: Request, maxBytes = MAX_REQUEST_BYTES): Promise<JsonBody> {
   const length = Number(request.headers.get("content-length") ?? 0);
   if (length > maxBytes) return { ok: false, reason: "too_large" };
   let raw: string;

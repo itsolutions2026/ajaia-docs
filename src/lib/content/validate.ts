@@ -35,9 +35,11 @@ export function validateContent(input: unknown): ContentResult {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     return { ok: false, reason: "Content must be an object." };
   }
+  // Measured in UTF-8 bytes, the same unit readJson() uses for the request
+  // body cap, so any content that passes here also fits in a save request.
   let size: number;
   try {
-    size = JSON.stringify(input).length;
+    size = new TextEncoder().encode(JSON.stringify(input)).byteLength;
   } catch {
     return { ok: false, reason: "Content is not valid JSON." };
   }

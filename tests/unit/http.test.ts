@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 // http.ts imports the session module; stub it so no database is needed.
 vi.mock("@/lib/auth", () => ({ getSessionUser: vi.fn() }));
 
-const { handle, readJson, sameOrigin } = await import("@/lib/http");
+const { handle, readJson, sameOrigin, MAX_REQUEST_BYTES } = await import("@/lib/http");
+const { validateContent, MAX_CONTENT_BYTES } = await import("@/lib/content/validate");
 
 function req(headers: Record<string, string>, body?: string) {
   return new Request("http://localhost:3000/api/x", { method: "POST", headers, body });
@@ -33,6 +34,30 @@ describe("readJson", () => {
       ok: false,
       reason: "too_large",
     });
+  });
+});
+
+describe("size limits (UTF-8 bytes)", () => {
+  const doc = (text: string) => ({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
+
+  it("counts multibyte characters as bytes in readJson", async () => {
+    // 60 characters, 120 UTF-8 bytes: over a 100-byte cap.
+    const body = JSON.stringify({ s: "é".repeat(60) });
+    expect(await readJson(req({}, body), 100)).toEqual({ ok: false, reason: "too_large" });
+  });
+
+  it("rejects content over the limit when measured in bytes, not characters", () => {
+    // 340k CJK characters: under 1M characters but over 1M UTF-8 bytes.
+    expect(validateContent(doc("中".repeat(340_000))).ok).toBe(false);
+  });
+
+  it("lets any content that passes validation fit in a save request", async () => {
+    // Just under the content limit in CJK (3 bytes per character).
+    const content = doc("中".repeat(Math.floor((MAX_CONTENT_BYTES - 200) / 3)));
+    expect(validateContent(content).ok).toBe(true);
+    const body = JSON.stringify({ baseVersion: 1, title: "中".repeat(200), content });
+    expect(new TextEncoder().encode(body).byteLength).toBeLessThanOrEqual(MAX_REQUEST_BYTES);
+    expect((await readJson(req({}, body))).ok).toBe(true);
   });
 });
 
