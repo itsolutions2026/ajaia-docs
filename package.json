@@ -7,24 +7,37 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "db:check": "node --env-file=.env.local scripts/db-check.mjs"
+    "db:check": "node --env-file=.env.local scripts/db-check.mjs",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node --env-file=.env.local node_modules/drizzle-kit/bin.cjs migrate",
+    "db:seed": "node --env-file=.env.local --experimental-strip-types scripts/seed.ts",
+    "test": "vitest run tests/unit",
+    "test:db": "node --env-file=.env.local node_modules/vitest/vitest.mjs run tests/db"
   },
   "dependencies": {
+    "@tiptap/core": "^3.33.1",
+    "@tiptap/pm": "^3.33.1",
+    "@tiptap/react": "^3.33.1",
+    "@tiptap/starter-kit": "^3.33.1",
     "drizzle-orm": "^0.45.4",
     "next": "16.4.6",
     "postgres": "^4.1.1",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
-    "@types/node": "^20",
+    "@types/mdast": "^4.0.4",
+    "@types/node": "^22.20.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "drizzle-kit": "^0.31.11",
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
     "tailwindcss": "4.3.3",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^5.1.0"
   }
 }

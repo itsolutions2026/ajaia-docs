@@ -3,14 +3,12 @@ import "server-only";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
+import * as schema from "./schema";
+
 /**
  * Server-only database access (Supabase Postgres via the transaction pooler).
- *
- * - Connection string comes exclusively from process.env.DATABASE_URL.
- * - `prepare: false` is required by the Supabase transaction pooler.
- * - `max: 1` keeps each serverless instance to a single connection.
- * - Created lazily, so importing this module never fails a build that does
- *   not touch the database.
+ * Connection string comes exclusively from process.env.DATABASE_URL.
+ * `prepare: false` is required by the transaction pooler.
  */
 function createDb() {
   const url = process.env.DATABASE_URL;
@@ -20,16 +18,15 @@ function createDb() {
 
   const client = postgres(url, {
     prepare: false,
-    max: 1,
+    max: 5,
     idle_timeout: 20,
     connect_timeout: 10,
     ssl: "require",
   });
 
-  return drizzle(client);
+  return drizzle(client, { schema });
 }
 
-// Reuse one instance across hot reloads in development.
 const globalForDb = globalThis as unknown as {
   __ajaiaDb?: ReturnType<typeof createDb>;
 };

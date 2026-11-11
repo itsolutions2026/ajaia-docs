@@ -1,4 +1,19 @@
-export default function Home() {
+import { redirect } from "next/navigation";
+
+import LoginForm from "@/components/login-form";
+import { getSessionUser } from "@/lib/auth";
+
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+  let user = null;
+  try {
+    user = await getSessionUser();
+  } catch {
+    // Database unavailable: still show the landing page.
+  }
+  if (user) redirect("/documents");
+
   return (
     <main className="flex flex-1 flex-col items-center justify-center px-6 py-16">
       <div className="w-full max-w-md text-center">
@@ -14,16 +29,15 @@ export default function Home() {
           <h2 id="signin-heading" className="text-base font-medium">
             Sign in
           </h2>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            Sign-in is coming soon. Demo accounts will be available here.
-          </p>
-          <button
-            type="button"
-            disabled
-            className="mt-5 w-full cursor-not-allowed rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
-          >
-            Sign in
-          </button>
+          <LoginForm />
+          <div className="mt-5 border-t border-zinc-200 pt-4 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+            <p className="font-medium">Demo accounts</p>
+            <ul className="mt-1 space-y-1">
+              <li>alice@demo.ajaia.example · Alice-Demo-2026 (owner)</li>
+              <li>bob@demo.ajaia.example · Bob-Demo-2026 (editor on Alice&apos;s doc)</li>
+              <li>carol@demo.ajaia.example · Carol-Demo-2026 (no access)</li>
+            </ul>
+          </div>
         </section>
       </div>
     </main>

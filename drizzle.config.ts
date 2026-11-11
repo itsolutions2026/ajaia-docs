@@ -1,13 +1,12 @@
 import { defineConfig } from "drizzle-kit";
 
-// Schema file does not exist yet; it is created in a later step.
-// Migration commands will need a session-pooler/direct URL (not the
-// transaction pooler); that is configured when migrations are introduced.
+// Migrations use MIGRATION_DATABASE_URL (session pooler, port 5432) when set;
+// the app itself only ever uses DATABASE_URL (transaction pooler).
 export default defineConfig({
   dialect: "postgresql",
   schema: "./src/lib/db/schema.ts",
   out: "./drizzle",
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? "",
+    url: process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
   },
 });
